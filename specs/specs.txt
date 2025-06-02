@@ -1,0 +1,168 @@
+Project Specification: LLM JSON Generation Evaluator
+
+1. Introduction & Project Goal
+
+    1.1. Problem Statement: Many Large Language Models (LLMs) do not consistently create JSON files correctly according to specified structures or prompts. This makes it challenging to reliably use LLMs for tasks requiring structured JSON output.
+    1.2. Project Objective: To build a web application that helps users create effective prompts for generating JSON, test these prompts with mock data against multiple LLMs, and evaluate the LLMs' accuracy in producing the desired JSON structure.
+
+2. Core Features & User Workflow
+
+The application will guide the user through a phased process:
+
+    2.1. Phase 0: Initial Setup
+        Welcome: User navigates to the web application.
+        Assistant LLM Selection:
+            The system fetches a list of available LLM models from a configured OpenWebUI instance.
+            The user selects one LLM from this list to act as an "assistant LLM." This assistant LLM will be used for schema generation, mock data generation, and master prompt refinement during the setup phases.
+
+    2.2. Phase 1: Define Target JSON Structure & Schema (Iterative)
+        JSON Example Input: User uploads or pastes an example of the target JSON structure they want LLMs to generate.
+        Initial Schema Generation: The system sends this example JSON to the selected assistant LLM to generate an initial JSON schema.
+        Schema Review & Refinement (Iterative Loop):
+            The UI displays the user's example JSON and the LLM-generated schema side-by-side.
+            The user can:
+                Directly Edit: Manually edit the schema text.
+                LLM-Assisted Refinement: Provide textual feedback/corrections for the schema. The system sends this feedback (along with the original example and current schema) to the assistant LLM to generate a revised schema.
+                Test Schema: Paste a sample JSON object to validate it against the current version of the schema being refined. The system shows "Pass" or "Fail" with specific error messages.
+            This review, edit/feedback, and test loop continues until the user is satisfied.
+        Approve Schema: User approves the finalized schema. This schema becomes the "master schema" for validating outputs from target LLMs.
+
+    2.3. Phase 2: Generate and Refine Mock Input Data (Iterative)
+        Prompt for Mock Data Generation:
+            User writes a textual prompt describing the type of input data scenarios they want the assistant LLM to generate (e.g., "Generate realistic user profiles with a name, email, and a short bio.").
+            User specifies the desired number of mock data items to generate.
+        Assistant LLM Generates Mock Data: The system sends the user's prompt and quantity to the assistant LLM, which generates the mock input data items.
+        Review, Edit, and Curate Mock Data:
+            The generated mock data items are displayed in an editable table.
+            User can:
+                Edit the content of any generated item.
+                Manually add new mock data items.
+                Delete mock data items.
+        Confirm Mock Data: User confirms the curated list of mock input data. This list will be used to test the target LLMs.
+
+    2.4. Phase 3: Craft Master Prompt (Iterative & LLM-Assisted)
+        Initial Prompt Creation: User writes an initial "master prompt" in a text area. This prompt should instruct the target LLMs on how to generate the desired JSON using an item from the mock input data. The prompt must include a placeholder (e.g., {{INPUT_DATA}}) where each mock input item will be injected.
+        LLM-Assisted Prompt Refinement (Iterative Loop):
+            User can ask the assistant LLM to help generate or improve the master prompt. Context like the example JSON or the approved JSON schema can be provided to the assistant LLM for this task.
+            The assistant LLM suggests a prompt.
+            User reviews, directly edits, or provides further instructions to the assistant LLM for more revisions.
+        Save Master Prompt: User finalizes and saves the master prompt. This prompt will be used for all target LLM tests.
+
+    2.5. Phase 4: Select Models & Run Tests
+        Select Target LLMs: User selects one or more LLMs from the list fetched from OpenWebUI to be evaluated.
+        Start Test Run: User initiates the test run.
+        Test Execution:
+            The system iterates through each selected target LLM.
+            For each target LLM, it iterates through each item in the curated mock input data list.
+            For each mock input item, the system injects it into the master prompt and sends it to the current target LLM.
+            Tests for different LLMs should run in parallel to optimize time.
+        Progress Monitoring: The UI displays a table showing each selected target LLM and a progress bar indicating the status of its test execution (e.g., "Processing X of Y inputs").
+
+    2.6. Phase 5: View & Analyze Results
+        Results Dashboard: Once tests are complete, the UI displays a dashboard.
+        Summary Information:
+            Tables summarizing overall scores and key performance metrics for each tested LLM (e.g., schema compliance percentage, average execution time, token usage, estimated cost if available).
+        Graphical Visualizations:
+            Bar Charts: Overall scores, execution times, token usage, error frequencies per LLM.
+            Scatter Plots: Accuracy vs. Speed, Accuracy vs. Cost/Tokens. Points represent individual LLMs.
+            Radar Charts: Comparing LLM profiles across multiple selected metrics.
+            Interactive elements like tooltips, clickable legends, filtering, and dynamic metric selection for charts.
+        Detailed Drill-Down (Tabular Raw Data):
+            Users can select a specific LLM from the summary to view detailed results.
+            A table will list each individual test case (each mock input run against that LLM), showing:
+                The specific mock input data used.
+                The raw JSON output received from the LLM.
+                Parse Status: Whether the output was valid JSON.
+                Schema Compliance Status: "Pass" or "Fail" against the master schema.
+                Specific Validation Errors: List of discrepancies if schema validation failed (e.g., missing mandatory fields, incorrect data types).
+                Execution time for that specific call.
+                Tokens used for that specific call (if available).
+
+3. Non-Functional Requirements
+
+    3.1. User Interface & Experience:
+        Responsive Design: The web application must be usable across various screen sizes (desktop, tablet).
+        Dark Theme: The application will feature a dark color scheme.
+        Intuitive Navigation: Clear and logical flow between the different phases and sections.
+    3.2. Performance:
+        The system should efficiently handle concurrent API calls to multiple LLMs during the testing phase.
+
+4. Technical Stack & Architecture
+
+    4.1. Backend:
+        Language: Python
+        Framework: FastAPI
+        Responsibilities:
+            Provide RESTful APIs for the frontend.
+            Interact with OpenWebUI to list available LLM models.
+            Manage asynchronous/parallel API calls to selected LLMs for schema generation, mock data creation, prompt refinement, and JSON generation testing.
+            Serve the static files for the React frontend (initial HTML shell, JS/CSS bundles).
+            Handle data persistence (CRUD operations) with the database.
+
+    4.2. Frontend:
+        Library/Framework: React (bootstrapped using Vite recommended).
+        Responsibilities:
+            Render the user interface as a Single Page Application (SPA).
+            Manage client-side state and interactivity for all user workflow phases.
+            Make API calls to the FastAPI backend to send data and fetch results.
+            Display data, tables, and visualizations.
+        Development Environment: Node.js and npm/yarn required for package management, development server, and building the static assets.
+
+    4.3. Database:
+        Initial Choice: SQLite (for ease of development and setup).
+        Future Option: PostgreSQL (for more robustness and scalability if needed).
+        Data to be Stored:
+            User-provided JSON examples.
+            Approved JSON schemas.
+            User-defined prompts for mock data generation.
+            Curated mock input datasets.
+            User-defined master prompts for LLM testing.
+            Test configurations (which LLMs were selected, etc.).
+            Detailed test results from LLM evaluations (inputs, outputs, validation details, performance metrics).
+
+    4.4. Charting/Graphs (Frontend):
+        Primary Recommendation: Chart.js (for common charts like bar, scatter, radar due to its simplicity and wide use).
+        Alternative: Plotly.js (if more advanced or scientific chart types are needed).
+        Option for Custom Visuals: d3.js (if highly specific, unique visualizations are required that other libraries cannot produce).
+
+    4.5. Styling (Frontend):
+        CSS Framework: Tailwind CSS (for its utility-first approach, responsiveness, and theming capabilities including dark mode).
+
+5. Deployment
+
+    5.1. Method: Docker
+    5.2. Dockerfile Strategy: Multi-Stage Builds
+        Stage 1: Frontend Build ("frontend-builder")
+            Base Image: Node.js (e.g., node:20-alpine).
+            Process:
+                Copy frontend package.json, package-lock.json (or yarn.lock).
+                Run npm install (or yarn install).
+                Copy the rest of the frontend source code.
+                Run npm run build (or yarn build) to generate static assets (HTML, JS, CSS) into a /build or /dist directory.
+        Stage 2: Backend Runtime / Final Image
+            Base Image: Python (e.g., python:3.11-slim).
+            Process:
+                Copy backend requirements.txt.
+                Run pip install --no-cache-dir -r requirements.txt.
+                Copy backend application code (FastAPI app).
+                Copy the built static frontend assets from the frontend-builder stage (e.g., from /app/frontend/build in Stage 1 to /app/static in Stage 2).
+                Set CMD or ENTRYPOINT to run the FastAPI application using uvicorn.
+        FastAPI backend will be configured to serve static files from the directory where the React build output was copied.
+
+6. Key LLM Interaction Points & Logic
+
+    6.1. Assistant LLM (Selected by User):
+        Schema Generation: Takes a user-provided JSON example and generates a draft JSON schema.
+        Schema Refinement: Takes the current schema, user feedback, and optionally the original JSON example, and produces an improved schema.
+        Mock Input Data Generation: Takes a user-defined "data generation prompt" and a quantity, and produces a set of varied input data items.
+        Master Prompt Generation/Refinement: Takes user instructions (and optionally the JSON example or schema) and generates or improves the master prompt for testing target LLMs.
+
+    6.2. Target LLMs (Selected by User for Evaluation):
+        JSON Generation: Each target LLM executes the finalized master prompt, with each mock input data item injected, to produce a JSON output.
+        Evaluation Criteria for Output:
+            Valid JSON Parse: Can the output be parsed as JSON?
+            Schema Compliance: If parsable, does it adhere to the "master schema"?
+                Presence of all mandatory fields.
+                Correct data types for all fields as per schema.
+                Adherence to other schema constraints (e.g., enums, patterns, if defined and validated).
+                Structure is prioritized over exact data values, as long as values conform to type and schema constraints.
