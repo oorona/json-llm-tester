@@ -1,0 +1,20 @@
+services:
+  json-llm-tester: # This is the service name
+    build: . # Tells Docker Compose to build the image from the Dockerfile in the current directory
+    container_name: json-llm-tester # Explicitly sets the container name
+    ports:
+      - "8000:8000" # Maps port 8000 of your host machine to port 8000 of the container (where FastAPI runs)
+    restart: unless-stopped # Sets the restart policy
+    networks:
+      - llmnet # Connects this service to the 'llm-net' network
+    # If your application relies on environment variables from a specific .env file 
+    # that is NOT copied by the Dockerfile, you can specify it here:
+    # env_file:
+    #   - ./backend/.env 
+    # However, the Dockerfile we created earlier already copies backend/.env into the image.
+    # If you want to override or provide variables at runtime via docker-compose, 
+    # you could use the 'environment' key or the 'env_file' key here.
+
+networks:
+  llmnet:
+    external: true # Declares that 'llm-net' is an existing, external network

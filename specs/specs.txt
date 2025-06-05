@@ -12,8 +12,9 @@ The application will guide the user through a phased process:
     2.1. Phase 0: Initial Setup
         Welcome: User navigates to the web application.
         Assistant LLM Selection:
-            The system fetches a list of available LLM models from a configured OpenWebUI instance.
-            The user selects one LLM from this list to act as an "assistant LLM." This assistant LLM will be used for schema generation, mock data generation, and master prompt refinement during the setup phases.
+            The system fetches a list of available LLM models from a configured LLM Service Proxy (e.g., LiteLLM instance) which provides an OpenAI-compatible `/v1/models` endpoint.
+            The user selects one LLM from this list to act as an "assistant LLM."
+            This assistant LLM will be used for schema generation, mock data generation, and master prompt refinement during the setup phases.
 
     2.2. Phase 1: Define Target JSON Structure & Schema (Iterative)
         JSON Example Input: User uploads or pastes an example of the target JSON structure they want LLMs to generate.
@@ -23,9 +24,10 @@ The application will guide the user through a phased process:
             The user can:
                 Directly Edit: Manually edit the schema text.
                 LLM-Assisted Refinement: Provide textual feedback/corrections for the schema. The system sends this feedback (along with the original example and current schema) to the assistant LLM to generate a revised schema.
-                Test Schema: Paste a sample JSON object to validate it against the current version of the schema being refined. The system shows "Pass" or "Fail" with specific error messages.
+                Test Schema: Paste a sample JSON object to validate it against the current version of the schema being refined.
+                The system shows "Pass" or "Fail" with specific error messages.
             This review, edit/feedback, and test loop continues until the user is satisfied.
-        Approve Schema: User approves the finalized schema. This schema becomes the "master schema" for validating outputs from target LLMs.
+        Approve Schema: User approves the finalized schema. This schema becomes the "master schema" for validating outputs from target LLMs. *This is implemented by updating the schema's status (e.g., to 'approved_master') via a PUT request to the schema update endpoint.*
 
     2.3. Phase 2: Generate and Refine Mock Input Data (Iterative)
         Prompt for Mock Data Generation:
@@ -38,24 +40,28 @@ The application will guide the user through a phased process:
                 Edit the content of any generated item.
                 Manually add new mock data items.
                 Delete mock data items.
-        Confirm Mock Data: User confirms the curated list of mock input data. This list will be used to test the target LLMs.
+        Confirm Mock Data: User confirms the curated list of mock input data.
+        This list will be used to test the target LLMs.
 
     2.4. Phase 3: Craft Master Prompt (Iterative & LLM-Assisted)
-        Initial Prompt Creation: User writes an initial "master prompt" in a text area. This prompt should instruct the target LLMs on how to generate the desired JSON using an item from the mock input data. The prompt must include a placeholder (e.g., {{INPUT_DATA}}) where each mock input item will be injected.
+        Initial Prompt Creation: User writes an initial "master prompt" in a text area.
+        This prompt should instruct the target LLMs on how to generate the desired JSON using an item from the mock input data.
+        The prompt must include a placeholder (e.g., {{INPUT_DATA}}) where each mock input item will be injected.
         LLM-Assisted Prompt Refinement (Iterative Loop):
-            User can ask the assistant LLM to help generate or improve the master prompt. Context like the example JSON or the approved JSON schema can be provided to the assistant LLM for this task.
+            User can ask the assistant LLM to help generate or improve the master prompt.
+            Context like the example JSON or the approved JSON schema can be provided to the assistant LLM for this task.
             The assistant LLM suggests a prompt.
             User reviews, directly edits, or provides further instructions to the assistant LLM for more revisions.
         Save Master Prompt: User finalizes and saves the master prompt. This prompt will be used for all target LLM tests.
 
     2.5. Phase 4: Select Models & Run Tests
-        Select Target LLMs: User selects one or more LLMs from the list fetched from OpenWebUI to be evaluated.
+        Select Target LLMs: User selects one or more LLMs from the list fetched from the configured LLM Service Proxy to be evaluated.
         Start Test Run: User initiates the test run.
         Test Execution:
             The system iterates through each selected target LLM.
             For each target LLM, it iterates through each item in the curated mock input data list.
             For each mock input item, the system injects it into the master prompt and sends it to the current target LLM.
-            Tests for different LLMs should run in parallel to optimize time.
+            *The overall test execution for a given test run will be managed by FastAPI background tasks to prevent HTTP timeouts for the initial request. True parallelism for concurrent calls to different LLMs within a single test run execution can be achieved within the background task using asynchronous HTTP calls (e.g., `asyncio.gather` with an HTTP client like `httpx`).*
         Progress Monitoring: The UI displays a table showing each selected target LLM and a progress bar indicating the status of its test execution (e.g., "Processing X of Y inputs").
 
     2.6. Phase 5: View & Analyze Results
@@ -94,10 +100,11 @@ The application will guide the user through a phased process:
         Framework: FastAPI
         Responsibilities:
             Provide RESTful APIs for the frontend.
-            Interact with OpenWebUI to list available LLM models.
-            Manage asynchronous/parallel API calls to selected LLMs for schema generation, mock data creation, prompt refinement, and JSON generation testing.
+            Interact with a configured LLM Service Proxy (e.g., LiteLLM) to list available LLM models (via an OpenAI-compatible `/v1/models` endpoint) and to execute chat completions against specified models (via an OpenAI-compatible `/v1/chat/completions` endpoint).
+            Manage asynchronous/parallel API calls to selected LLMs for schema generation, mock data creation, prompt refinement, and JSON generation testing (test execution itself will leverage FastAPI background tasks).
             Serve the static files for the React frontend (initial HTML shell, JS/CSS bundles).
             Handle data persistence (CRUD operations) with the database.
+            *API endpoints are organized into separate router files (e.g., for schemas, mock data, master prompts, test runs) using FastAPI's `APIRouter` for better maintainability.*
 
     4.2. Frontend:
         Library/Framework: React (bootstrapped using Vite recommended).
@@ -128,6 +135,23 @@ The application will guide the user through a phased process:
     4.5. Styling (Frontend):
         CSS Framework: Tailwind CSS (for its utility-first approach, responsiveness, and theming capabilities including dark mode).
 
+    4.6. Key API Endpoints Overview (New Section)
+
+    The backend provides RESTful APIs for various functionalities. Key resource management includes:
+
+    * **/json-examples**: For creating and listing user-provided JSON examples.
+        * Actions: `POST /{example_id}/generate-schema` (triggers LLM schema generation).
+    * **/json-schemas**: For CRUD operations, LLM refinement, validation, and approval of JSON schemas.
+        * Includes `POST /{schema_id}/generate-mock-data` to initiate mock data generation based on an approved schema.
+    * **/mock-data**: (or the chosen prefix for the mock data CRUD router) For managing mock data generation prompts and individual mock data items.
+        * e.g., `/prompts/` (GET, DELETE), `/prompts/{prompt_id}/items/` (GET, POST), `/items/{item_id}` (GET, PUT, DELETE).
+    * **/master-prompts**: For CRUD operations and LLM refinement of master prompts.
+        * e.g., `GET /`, `POST /`, `GET /{id}`, `PUT /{id}`, `DELETE /{id}`, `POST /{id}/refine-with-llm`.
+    * **/test-runs**: For initiating test runs and retrieving test run information and results.
+        * e.g., `POST /`, `GET /`, `GET /{id}`.
+    * **/models**: (Proxied via backend from the LLM Service) Lists available LLM models.
+    * **/testing/chat**: (Proxied via backend to the LLM Service) A utility to test chat completions.
+
 5. Deployment
 
     5.1. Method: Docker
@@ -147,17 +171,17 @@ The application will guide the user through a phased process:
                 Copy backend application code (FastAPI app).
                 Copy the built static frontend assets from the frontend-builder stage (e.g., from /app/frontend/build in Stage 1 to /app/static in Stage 2).
                 Set CMD or ENTRYPOINT to run the FastAPI application using uvicorn.
-        FastAPI backend will be configured to serve static files from the directory where the React build output was copied.
+            FastAPI backend will be configured to serve static files from the directory where the React build output was copied.
 
 6. Key LLM Interaction Points & Logic
 
-    6.1. Assistant LLM (Selected by User):
+    6.1. Assistant LLM (Selected by User, via LLM Service Proxy):
         Schema Generation: Takes a user-provided JSON example and generates a draft JSON schema.
         Schema Refinement: Takes the current schema, user feedback, and optionally the original JSON example, and produces an improved schema.
-        Mock Input Data Generation: Takes a user-defined "data generation prompt" and a quantity, and produces a set of varied input data items.
+        Mock Input Data Generation: Takes a user-defined "data generation prompt" (and optionally a target JSON schema for context) and a quantity, and produces a set of varied input data items (as a JSON array).
         Master Prompt Generation/Refinement: Takes user instructions (and optionally the JSON example or schema) and generates or improves the master prompt for testing target LLMs.
 
-    6.2. Target LLMs (Selected by User for Evaluation):
+    6.2. Target LLMs (Selected by User for Evaluation, via LLM Service Proxy):
         JSON Generation: Each target LLM executes the finalized master prompt, with each mock input data item injected, to produce a JSON output.
         Evaluation Criteria for Output:
             Valid JSON Parse: Can the output be parsed as JSON?
@@ -165,4 +189,4 @@ The application will guide the user through a phased process:
                 Presence of all mandatory fields.
                 Correct data types for all fields as per schema.
                 Adherence to other schema constraints (e.g., enums, patterns, if defined and validated).
-                Structure is prioritized over exact data values, as long as values conform to type and schema constraints.
+            Structure is prioritized over exact data values, as long as values conform to type and schema constraints.

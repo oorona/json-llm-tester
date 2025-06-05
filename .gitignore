@@ -1,0 +1,4 @@
+backend/.venv
+backend/db_backups/
+backend/.env
+.git

@@ -1,0 +1,11 @@
+# backend/requirements.txt
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.0
+pydantic-settings==2.2.1
+python-dotenv==1.0.1
+requests==2.31.0
+jsonschema==4.22.0 
+# New Database Libraries
+SQLAlchemy==2.0.29 # Or a more recent 2.x version
+aiosqlite==0.20.0 # For async SQLite operations

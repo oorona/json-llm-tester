@@ -1,0 +1,29 @@
+# .dockerignore
+
+# Python stuff
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/ # Your virtual environment
+backend/db_backups/
+
+# Frontend stuff
+frontend/node_modules/
+frontend/build/ # If your build output is 'build' and you only copy from 'dist'
+frontend/dist/  # If you only want to copy specific files, not the whole dir initially
+
+# General
+.git/
+.gitignore
+.dockerignore
+Dockerfile*
+docker-compose*
+
+# IDE / OS specific
+.vscode/
+.idea/
+*.DS_Store
