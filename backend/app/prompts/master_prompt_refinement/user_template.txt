@@ -1,0 +1,11 @@
+Here is the current master prompt that needs refinement:
+---
+{current_prompt_content}
+---
+{optional_schema_context}
+User's feedback and instructions for refinement:
+---
+{user_feedback}
+---
+
+Please provide the revised master prompt based on the above:

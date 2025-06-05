@@ -1,0 +1,9 @@
+Here is the current JSON schema:
+```json
+{current_schema_content_str}
+```
+{optional_original_example_context}
+Here is the user's feedback on what to change or improve:
+"{user_feedback}"
+
+Please provide the revised JSON schema based on this feedback:

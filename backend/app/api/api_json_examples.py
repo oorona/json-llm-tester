@@ -11,6 +11,7 @@ from app import db_models # SQLAlchemy models
 from app import models as pydantic_models # Pydantic models
 from app.services import llm_service # For calling LLM
 from app.core.config import settings # For DEFAULT_ASSISTANT_MODEL_ID
+from app.core.prompt_loader import load_prompt, load_and_format_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -72,22 +73,15 @@ async def generate_schema_from_example(
         logger.error(f"Could not serialize JsonExample content to JSON string for example ID {example_id}: {e}")
         raise HTTPException(status_code=500, detail="Error processing example content.")
 
+    system_prompt_str = load_prompt("schema_generation/system.txt")
+    user_prompt_str = load_and_format_prompt(
+        "schema_generation/user_template.txt",
+        json_example_content_str=json_example_content_str
+    )
+
     prompt_messages = [
-        # ... (prompt definition as before) ...
-        {
-            "role": "system",
-            "content": (
-                "You are an expert AI assistant that generates JSON schemas. "
-                "Given a JSON object, generate a concise and accurate JSON schema that describes its structure, "
-                "data types, and any clearly inferred constraints (like required fields if obvious). "
-                "Your output MUST be only the JSON schema object itself, starting with '{' and ending with '}'. "
-                "Do not include any explanatory text before or after the JSON schema."
-            )
-        },
-        {
-            "role": "user",
-            "content": f"Please generate a JSON schema for the following JSON object:\n\n```json\n{json_example_content_str}\n```"
-        }
+        {"role": "system", "content": system_prompt_str},
+        {"role": "user", "content": user_prompt_str}
     ]
     
     assistant_model_id = settings.DEFAULT_ASSISTANT_MODEL_ID

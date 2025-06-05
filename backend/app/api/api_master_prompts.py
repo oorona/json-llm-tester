@@ -12,6 +12,7 @@ from app import db_models # SQLAlchemy models
 from app import models as pydantic_models # Pydantic models
 from app.services import llm_service # For calling LLM
 from app.core.config import settings # For DEFAULT_ASSISTANT_MODEL_ID
+from app.core.prompt_loader import load_prompt, load_and_format_prompt 
 
 logger = logging.getLogger(__name__)
 
@@ -299,32 +300,32 @@ async def refine_master_prompt_with_llm(
 
 
     # 3. Construct a prompt for the assistant LLM
-    prompt_instruction = (
-        "You are an expert AI assistant that helps refine prompts for Large Language Models. "
-        "Given an existing 'master prompt', user feedback for improvement, and potentially some context (like a target JSON schema), "
-        "your task is to provide a revised and improved master prompt. "
-        "The revised master prompt should clearly incorporate the user's feedback and aim to be more effective for its intended purpose. "
-        "Your output MUST be only the revised master prompt text itself. Do not include any explanatory text, "
-        "markdown formatting for the prompt itself (unless it's part of the prompt's desired content), or any other surrounding text."
-    )
-    
-    user_prompt_sections = [
-        f"Here is the current master prompt that needs refinement:\n---\n{current_prompt_content}\n---"
-    ]
-    if context_parts:
-        user_prompt_sections.append("\nAdditional Context:")
-        user_prompt_sections.extend(context_parts)
-    
-    user_prompt_sections.append(f"\nUser's feedback and instructions for refinement:\n---\n{user_feedback}\n---")
-    user_prompt_sections.append("\nPlease provide the revised master prompt based on the above:")
+    prompt_instruction = load_prompt("master_prompt_refinement/system.txt")
 
-    full_user_prompt = "\n".join(user_prompt_sections)
+    optional_schema_context_str = ""
+    if db_master_prompt.target_schema and db_master_prompt.target_schema.schema_content:
+        try:
+            schema_content_str = json.dumps(db_master_prompt.target_schema.schema_content, indent=2)
+            optional_schema_context_str = (
+                f"The master prompt is intended to be used with the following JSON schema "
+                f"(for context on desired output structure):\n```json\n{schema_content_str}\n```\n"
+            )
+            logger.info(f"Including target schema (ID: {db_master_prompt.target_schema_id}) in context for LLM refinement.")
+        except TypeError:
+            logger.warning(f"Could not serialize target schema content for Master Prompt ID {prompt_id}.")
+
+
+    full_user_prompt = load_and_format_prompt(
+        "master_prompt_refinement/user_template.txt",
+        current_prompt_content=current_prompt_content,
+        optional_schema_context=optional_schema_context_str,
+        user_feedback=user_feedback
+    )
 
     prompt_messages = [
         {"role": "system", "content": prompt_instruction},
         {"role": "user", "content": full_user_prompt}
     ]
-
     # 4. Call the LLM service
     assistant_model_id = settings.DEFAULT_ASSISTANT_MODEL_ID
     if not assistant_model_id or assistant_model_id == "default_assistant_model_from_code":

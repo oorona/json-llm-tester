@@ -12,6 +12,7 @@ from app import models as pydantic_models # Pydantic models
 from app.services import llm_service # For calling LLM
 from app.core.config import settings # For DEFAULT_ASSISTANT_MODEL_ID
 from jsonschema import validate, ValidationError, SchemaError # Import for jsonschema validation
+from app.core.prompt_loader import load_prompt, load_and_format_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -116,24 +117,25 @@ async def refine_json_schema_with_llm(
             logger.info(f"Including original JSON example (ID: {db_schema.json_example_id}) content in prompt for context.")
 
     # 3. Construct a prompt for the assistant LLM
-    prompt_parts = [
-        "You are an expert AI assistant that refines JSON schemas based on user feedback.",
-        "Given a current JSON schema and user feedback, your task is to provide an improved JSON schema.",
-        "Your output MUST be only the revised JSON schema object itself, starting with '{' and ending with '}'.",
-        "Do not include any explanatory text before or after the JSON schema.",
-        f"\nHere is the current JSON schema:\n```json\n{current_schema_content_str}\n```",
-    ]
-    if original_example_content_str:
-        prompt_parts.append(f"\nThis schema was originally derived from or related to the following JSON example (for context):\n```json\n{original_example_content_str}\n```")
-    
-    prompt_parts.append(f"\nHere is the user's feedback on what to change or improve:\n\"{user_feedback}\"")
-    prompt_parts.append("\nPlease provide the revised JSON schema based on this feedback:")
+    system_prompt_instruction = load_prompt("schema_refinement/system.txt") # System prompt is now simpler
 
-    system_prompt = " ".join(prompt_parts[:4]) # General instructions
-    user_prompt_content = "\n".join(prompt_parts[4:]) # Schema, example (if any), feedback, and final request
+    optional_example_context_str = ""
+    if original_example_content_str:
+        optional_example_context_str = (
+            f"\nThis schema was originally derived from or related to the "
+            f"following JSON example (for context):\n```json\n{original_example_content_str}\n```"
+        )
+
+    user_prompt_content = load_and_format_prompt(
+        "schema_refinement/user_template.txt",
+        current_schema_content_str=current_schema_content_str,
+        optional_original_example_context=optional_example_context_str,
+        user_feedback=user_feedback
+    )
 
     prompt_messages = [
-        {"role": "system", "content": system_prompt},
+        # System prompt can be directly loaded if it's static, or constructed if needed
+        {"role": "system", "content": system_prompt_instruction},
         {"role": "user", "content": user_prompt_content}
     ]
 
@@ -293,12 +295,6 @@ async def list_json_schemas(
     logger.info(f"Retrieved {len(db_schemas)} JSON schemas.")
     return db_schemas
 
-# backend/app/api/api_json_schemas.py
-# ... (existing imports) ...
-from sqlalchemy.orm import selectinload # For eager loading
-
-# ... (logger, router, existing schema endpoints) ...
-
 @router.post(
     "/{schema_id}/generate-mock-data",
     response_model=pydantic_models.MockDataGenerationInitiatedResponse,
@@ -337,15 +333,15 @@ async def generate_mock_data_for_schema(
     logger.info(f"MockDataPrompt created with ID: {db_mock_data_prompt.id}")
 
     schema_content_str = json.dumps(db_schema.schema_content, indent=2)
-    llm_system_prompt = (
-        f"You are an AI assistant that generates mock data. Generate {db_mock_data_prompt.desired_item_count} distinct mock data items based on the user's prompt "
-        f"and try to make each item conform to the provided JSON schema. Your output MUST be a single, valid JSON array where each element "
-        "is a JSON object representing one mock data item. Do NOT include any explanatory text before or after the JSON array. Just the array itself."
+    llm_system_prompt = load_and_format_prompt(
+        "mock_data_generation/system_template.txt",
+        desired_item_count=db_mock_data_prompt.desired_item_count
     )
-    llm_user_prompt = (
-        f"User's prompt: \"{db_mock_data_prompt.prompt_text}\"\n\n"
-        f"Target JSON Schema:\n```json\n{schema_content_str}\n```\n\n"
-        f"Please generate {db_mock_data_prompt.desired_item_count} mock data items as a JSON array."
+    llm_user_prompt = load_and_format_prompt(
+        "mock_data_generation/user_template.txt",
+        prompt_text=db_mock_data_prompt.prompt_text, # Corrected variable name
+        schema_content_str=schema_content_str,
+        desired_item_count=db_mock_data_prompt.desired_item_count
     )
     prompt_messages = [{"role": "system", "content": llm_system_prompt}, {"role": "user", "content": llm_user_prompt}]
 
@@ -412,147 +408,142 @@ async def generate_mock_data_for_schema(
     )
 
 
-@router.post(
-    "/json-schemas/{schema_id}/generate-mock-data",
-    response_model=pydantic_models.MockDataGenerationResponse, # Custom response
-    status_code=201,
-    summary="Generate Mock Data for a JSON Schema"
-)
-async def generate_mock_data_for_schema(
-    schema_id: int,
-    prompt_request: pydantic_models.MockDataPromptCreate,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    Creates a mock data generation prompt and triggers an LLM to generate mock data items
-    for a specific JSON schema.
-    - User writes a textual prompt describing the type of input data scenarios.
-    - User specifies the desired number of mock data items to generate.
-    - The system sends the user's prompt and quantity to the assistant LLM.
-    """
-    logger.info(f"Request to generate {prompt_request.desired_item_count} mock data items for schema ID: {schema_id} using prompt: '{prompt_request.prompt_text[:50]}...'")
+# @router.post(
+#     "/json-schemas/{schema_id}/generate-mock-data",
+#     response_model=pydantic_models.MockDataGenerationResponse, # Custom response
+#     status_code=201,
+#     summary="Generate Mock Data for a JSON Schema"
+# )
+# async def generate_mock_data_for_schema(
+#     schema_id: int,
+#     prompt_request: pydantic_models.MockDataPromptCreate,
+#     db: AsyncSession = Depends(get_db_session)
+# ):
+#     """
+#     Creates a mock data generation prompt and triggers an LLM to generate mock data items
+#     - User writes a textual prompt describing the type of input data scenarios.
+#     - User specifies the desired number of mock data items to generate.
+#     - The system sends the user's prompt and quantity to the assistant LLM.
+#     """
+#     logger.info(f"Request to generate {prompt_request.desired_item_count} mock data items for schema ID: {schema_id} using prompt: '{prompt_request.prompt_text[:50]}...'")
 
-    # 1. Verify target schema exists
-    db_schema = await db.get(db_models.JsonSchema, schema_id)
-    if not db_schema:
-        raise HTTPException(status_code=404, detail=f"JSON Schema with ID {schema_id} not found.")
-    if db_schema.status != "approved_master": # Or some other "finalized" status
-        logger.warning(f"Attempt to generate mock data for schema ID {schema_id} which is not an 'approved_master' schema (status: {db_schema.status}).")
-        # Decide if this should be a hard error or just a warning. For now, proceeding.
+#     # 1. Verify target schema exists
+#     db_schema = await db.get(db_models.JsonSchema, schema_id)
+#     if not db_schema:
+#         raise HTTPException(status_code=404, detail=f"JSON Schema with ID {schema_id} not found.")
+#     if db_schema.status != "approved_master": # Or some other "finalized" status
+#         logger.warning(f"Attempt to generate mock data for schema ID {schema_id} which is not an 'approved_master' schema (status: {db_schema.status}).")
+#         # Decide if this should be a hard error or just a warning. For now, proceeding.
 
-    # 2. Create and store the MockDataPrompt
-    db_mock_data_prompt = db_models.MockDataPrompt(
-        prompt_text=prompt_request.prompt_text,
-        desired_item_count=prompt_request.desired_item_count,
-        target_schema_id=schema_id
-    )
-    db.add(db_mock_data_prompt)
-    await db.commit()
-    await db.refresh(db_mock_data_prompt)
-    logger.info(f"MockDataPrompt created with ID: {db_mock_data_prompt.id}")
+#     # 2. Create and store the MockDataPrompt
+#     db_mock_data_prompt = db_models.MockDataPrompt(
+#         prompt_text=prompt_request.prompt_text,
+#         desired_item_count=prompt_request.desired_item_count,
+#         target_schema_id=schema_id
+#     )
+#     db.add(db_mock_data_prompt)
+#     await db.commit()
+#     await db.refresh(db_mock_data_prompt)
+#     logger.info(f"MockDataPrompt created with ID: {db_mock_data_prompt.id}")
 
-    # 3. Construct prompt for LLM to generate mock data items
-    # The LLM should be asked to return a JSON array of JSON objects.
-    schema_content_str = json.dumps(db_schema.schema_content, indent=2)
-    llm_system_prompt = (
-        "You are an AI assistant that generates mock data based on a user's textual prompt and a given JSON schema. "
-        f"You need to generate {db_mock_data_prompt.desired_item_count} distinct mock data items. "
-        "Each item should generally conform to the structure of the provided JSON schema. "
-        "Your output MUST be a single, valid JSON array where each element of the array is a JSON object representing one mock data item. "
-        "Do NOT include any explanatory text before or after the JSON array. Just the array itself, starting with '[' and ending with ']'."
-    )
-    llm_user_prompt = (
-        f"User's textual prompt for mock data characteristics: \"{db_mock_data_prompt.prompt_text}\"\n\n"
-        f"JSON Schema to base the mock data items on:\n```json\n{schema_content_str}\n```\n\n"
-        f"Please generate {db_mock_data_prompt.desired_item_count} mock data items as a JSON array."
-    )
-    prompt_messages = [
-        {"role": "system", "content": llm_system_prompt},
-        {"role": "user", "content": llm_user_prompt}
-    ]
+#     # 3. Construct prompt for LLM to generate mock data items
+#     # The LLM should be asked to return a JSON array of JSON objects.
+#     schema_content_str = json.dumps(db_schema.schema_content, indent=2)
+#     llm_system_prompt = load_and_format_prompt(
+#         "mock_data_generation/system_template.txt",
+#         desired_item_count=db_mock_data_prompt.desired_item_count
+#     )
+#     llm_user_prompt = load_and_format_prompt(
+#         "mock_data_generation/user_template.txt",
+#         prompt_text=db_mock_data_prompt.prompt_text, # Corrected variable name
+#         schema_content_str=schema_content_str,
+#         desired_item_count=db_mock_data_prompt.desired_item_count
+#     )
+#     prompt_messages = [{"role": "system", "content": llm_system_prompt}, {"role": "user", "content": llm_user_prompt}]
 
-    # 4. Call LLM service
-    assistant_model_id = settings.DEFAULT_ASSISTANT_MODEL_ID
-    if not assistant_model_id or assistant_model_id == "default_assistant_model_from_code":
-        # Rollback MockDataPrompt creation if LLM is not configured
-        await db.delete(db_mock_data_prompt)
-        await db.commit()
-        raise HTTPException(status_code=500, detail="Assistant LLM for mock data generation is not configured.")
+#     # 4. Call LLM service
+#     assistant_model_id = settings.DEFAULT_ASSISTANT_MODEL_ID
+#     if not assistant_model_id or assistant_model_id == "default_assistant_model_from_code":
+#         # Rollback MockDataPrompt creation if LLM is not configured
+#         await db.delete(db_mock_data_prompt)
+#         await db.commit()
+#         raise HTTPException(status_code=500, detail="Assistant LLM for mock data generation is not configured.")
 
-    logger.info(f"Calling assistant LLM ({assistant_model_id}) to generate mock data items for prompt ID: {db_mock_data_prompt.id}...")
-    generated_items_list = []
-    try:
-        llm_response = await llm_service.call_llm_chat_completions(
-            model_id=assistant_model_id,
-            messages=prompt_messages,
-            temperature=0.7 # Higher temperature for more varied mock data
-        )
+#     logger.info(f"Calling assistant LLM ({assistant_model_id}) to generate mock data items for prompt ID: {db_mock_data_prompt.id}...")
+#     generated_items_list = []
+#     try:
+#         llm_response = await llm_service.call_llm_chat_completions(
+#             model_id=assistant_model_id,
+#             messages=prompt_messages,
+#             temperature=0.7 # Higher temperature for more varied mock data
+#         )
         
-        llm_output_str = None
-        if llm_response and "choices" in llm_response and llm_response["choices"]:
-            choice = llm_response["choices"][0]
-            if "message" in choice and "content" in choice["message"]:
-                llm_output_str = choice["message"]["content"]
+#         llm_output_str = None
+#         if llm_response and "choices" in llm_response and llm_response["choices"]:
+#             choice = llm_response["choices"][0]
+#             if "message" in choice and "content" in choice["message"]:
+#                 llm_output_str = choice["message"]["content"]
         
-        if not llm_output_str:
-            raise HTTPException(status_code=500, detail="LLM did not return content for mock data.")
+#         if not llm_output_str:
+#             raise HTTPException(status_code=500, detail="LLM did not return content for mock data.")
 
-        # Basic cleanup for markdown code blocks
-        if llm_output_str.strip().startswith("```json"):
-            llm_output_str = llm_output_str.strip()[7:]
-            if llm_output_str.strip().endswith("```"):
-                 llm_output_str = llm_output_str.strip()[:-3]
-        elif llm_output_str.strip().startswith("```"):
-            llm_output_str = llm_output_str.strip()[3:]
-            if llm_output_str.strip().endswith("```"):
-                llm_output_str = llm_output_str.strip()[:-3]
+#         # Basic cleanup for markdown code blocks
+#         if llm_output_str.strip().startswith("```json"):
+#             llm_output_str = llm_output_str.strip()[7:]
+#             if llm_output_str.strip().endswith("```"):
+#                  llm_output_str = llm_output_str.strip()[:-3]
+#         elif llm_output_str.strip().startswith("```"):
+#             llm_output_str = llm_output_str.strip()[3:]
+#             if llm_output_str.strip().endswith("```"):
+#                 llm_output_str = llm_output_str.strip()[:-3]
         
-        generated_items_list = json.loads(llm_output_str)
-        if not isinstance(generated_items_list, list):
-            raise ValueError("LLM output for mock data was not a JSON list.")
-        logger.info(f"LLM generated {len(generated_items_list)} items. Expected {db_mock_data_prompt.desired_item_count}.")
+#         generated_items_list = json.loads(llm_output_str)
+#         if not isinstance(generated_items_list, list):
+#             raise ValueError("LLM output for mock data was not a JSON list.")
+#         logger.info(f"LLM generated {len(generated_items_list)} items. Expected {db_mock_data_prompt.desired_item_count}.")
 
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse LLM response as JSON array for mock data. Error: {e}. Response: {llm_output_str[:500]}...")
-        # Store the prompt but indicate failure to generate items
-        db_mock_data_prompt.prompt_text += "\n\n[SYSTEM NOTE: LLM failed to generate valid JSON data for items.]" # Append a note
-        await db.commit()
-        await db.refresh(db_mock_data_prompt)
-        # Return the prompt details with empty items, client can decide how to handle
-        return pydantic_models.MockDataGenerationResponse(prompt_details=db_mock_data_prompt, generated_items=[])
+#     except json.JSONDecodeError as e:
+#         logger.error(f"Failed to parse LLM response as JSON array for mock data. Error: {e}. Response: {llm_output_str[:500]}...")
+#         # Store the prompt but indicate failure to generate items
+#         db_mock_data_prompt.prompt_text += "\n\n[SYSTEM NOTE: LLM failed to generate valid JSON data for items.]" # Append a note
+#         await db.commit()
+#         await db.refresh(db_mock_data_prompt)
+#         # Return the prompt details with empty items, client can decide how to handle
+#         return pydantic_models.MockDataGenerationResponse(prompt_details=db_mock_data_prompt, generated_items=[])
 
-    except llm_service.LLMServiceError as e:
-        # Rollback MockDataPrompt creation or mark it as failed
-        await db.delete(db_mock_data_prompt)
-        await db.commit()
-        raise HTTPException(status_code=e.status_code or 503, detail=f"LLM service error: {str(e)}")
-    except Exception as e:
-        # Rollback or mark as failed
-        await db.delete(db_mock_data_prompt)
-        await db.commit()
-        logger.error(f"Unexpected error during mock data generation: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+#     except llm_service.LLMServiceError as e:
+#         # Rollback MockDataPrompt creation or mark it as failed
+#         await db.delete(db_mock_data_prompt)
+#         await db.commit()
+#         raise HTTPException(status_code=e.status_code or 503, detail=f"LLM service error: {str(e)}")
+#     except Exception as e:
+#         # Rollback or mark as failed
+#         await db.delete(db_mock_data_prompt)
+#         await db.commit()
+#         logger.error(f"Unexpected error during mock data generation: {str(e)}", exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
-    # 5. Store generated MockDataItems
-    created_db_items = []
-    for item_content in generated_items_list:
-        if not isinstance(item_content, dict): # Ensure each item is a JSON object
-            logger.warning(f"Skipping generated item as it's not a dictionary: {item_content}")
-            continue
-        db_item = db_models.MockDataItem(
-            item_content=item_content,
-            prompt_id=db_mock_data_prompt.id
-        )
-        db.add(db_item)
-        created_db_items.append(db_item)
+#     # 5. Store generated MockDataItems
+#     created_db_items = []
+#     for item_content in generated_items_list:
+#         # Now, item_content can be a string, number, boolean, dict, or list.
+#         # All are valid JSON values that can be stored in the JSON db column.
+#         # You might add a log if you want to track the types being stored:
+#         logger.info(f"Processing mock data item of type: {type(item_content)}")
+#         db_item = db_models.MockDataItem(
+#             item_content=item_content, # This will correctly store strings, numbers, etc.
+#             prompt_id=db_mock_data_prompt.id
+#         )
+#         db.add(db_item)
+#         created_db_items.append(db_item)
     
-    if created_db_items:
-        await db.commit()
-        for db_item in created_db_items: # Refresh each item to get its ID, created_at etc.
-            await db.refresh(db_item)
-        logger.info(f"Successfully stored {len(created_db_items)} mock data items for prompt ID {db_mock_data_prompt.id}.")
+#     if created_db_items:
+#         await db.commit()
+#         for db_item in created_db_items: # Refresh each item to get its ID, created_at etc.
+#             await db.refresh(db_item)
+#         logger.info(f"Successfully stored {len(created_db_items)} mock data items for prompt ID {db_mock_data_prompt.id}.")
     
-    # Refresh the prompt to get its generated_items relationship populated for the response
-    await db.refresh(db_mock_data_prompt, attribute_names=['generated_items'])
+#     # Refresh the prompt to get its generated_items relationship populated for the response
+#     await db.refresh(db_mock_data_prompt, attribute_names=['generated_items'])
 
-    return pydantic_models.MockDataGenerationResponse(prompt_details=db_mock_data_prompt)
+#     return pydantic_models.MockDataGenerationResponse(prompt_details=db_mock_data_prompt)

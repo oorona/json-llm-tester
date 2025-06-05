@@ -1,0 +1,2 @@
+User's prompt: "{prompt_text}"
+Please generate {desired_item_count} mock data items as a JSON array.

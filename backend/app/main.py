@@ -1,5 +1,5 @@
 # backend/app/main.py
-from fastapi import FastAPI
+from fastapi import FastAPI,HTTPException
 import logging
 
 from app.core.config import settings # For app-level configs
@@ -51,10 +51,6 @@ async def serve_spa(full_path: str):
     # The 'html=True' serves index.html for directory requests.
     # However, for client-side routing, the catch-all GET route is often more robust.
     raise HTTPException(status_code=404, detail="Resource not found")
-
-
-
-
 
 # Add other routers here as we create them (e.g., for api_json_schemas)
 

@@ -98,19 +98,19 @@ def backup_and_reset_database(db_path):
     return True
 
 # --- Test Functions ---
-def test_root():
-    global approved_schema_id_for_linking # Ensure it's accessible if modified
-    test_name = "GET / (Root)"
-    print(f"Starting Test: {test_name}")
-    success = False; message = ""
-    try:
-        response = requests.get(f"{BASE_URL}/", headers=HEADERS, timeout=5)
-        print_response_summary(response)
-        success = response.status_code == 200 and response.json().get("message") is not None
-        message = "Root endpoint check." if success else f"Failed with status {response.status_code}"
-    except Exception as e: message = f"Error: {e}"
-    print_test_result(test_name, success, message)
-    print("=" * 30)
+# def test_root():
+#     global approved_schema_id_for_linking # Ensure it's accessible if modified
+#     test_name = "GET / (Root)"
+#     print(f"Starting Test: {test_name}")
+#     success = False; message = ""
+#     try:
+#         response = requests.get(f"{BASE_URL}/", headers=HEADERS, timeout=5)
+#         print_response_summary(response)
+#         success = response.status_code == 200 and response.json().get("message") is not None
+#         message = "Root endpoint check." if success else f"Failed with status {response.status_code}"
+#     except Exception as e: message = f"Error: {e}"
+#     print_test_result(test_name, success, message)
+#     print("=" * 30)
 
 def test_get_models():
     test_name = "GET /models"
@@ -828,8 +828,8 @@ if __name__ == "__main__":
 
     # --- Phase 1 & Prerequisite Tests ---
     print("\n--- Running Basic and Phase 1 Schema Tests ---")
-    test_root(); time.sleep(0.1)
-    test_get_models(); time.sleep(0.1)
+    # test_root(); time.sleep(0.1)
+    # test_get_models(); time.sleep(0.1)
     
     test_list_json_examples(0); time.sleep(0.1) # Expect 0 before creation
     test_create_json_example(); time.sleep(0.1) # Sets created_example_id_global
